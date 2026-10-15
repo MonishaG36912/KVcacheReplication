@@ -1,12 +1,14 @@
 """
-Inspect the .pt files saved by Stage 2 (kv_source.pt, kv_target.pt).
-Run from inside the outputs/ folder:  python loadPTfiles.py
+Inspect any .pt files saved by the pipeline stages.
+Run from the repo root:  python outputs/inspect_outputs.py
 """
 
 import torch
 import os
 
-FILES = ["kv_source.pt", "kv_target.pt"]
+os.chdir(os.path.dirname(os.path.abspath(__file__)))  # always runs relative to outputs/
+
+FILES = ["kv_source.pt", "kv_target.pt", "kv_source_norope.pt", "kv_target_norope.pt"]
 
 for fname in FILES:
     if not os.path.exists(fname):
