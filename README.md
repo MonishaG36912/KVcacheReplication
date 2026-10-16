@@ -51,19 +51,25 @@ KVcacheSWE/
 │   └── nvidia_cross_model_kv_2026.pdf   # Reference paper
 │
 ├── stages/
-│   ├── 01_extract_kv.py             # Stage 1 & 2: Load models, extract KV tensors
+│   ├── kv_utils.py                  # Shared helpers: corpus, cache <-> tensors, RoPE, mapper layout
+│   ├── 01_extract_kv.py             # Stage 1 & 2: Load models, extract KV caches on WikiText-2 train
 │   ├── 02_rope_strip.py             # Stage 3: Remove RoPE from Key vectors
-│   └── 03_layer_select.py           # Stage 4: Top-k source layer selection via R²
+│   ├── 03_layer_select.py           # Stage 4: Top-k source layer selection via K+V R²
+│   ├── 04_fit_mapper.py             # Stage 5: Closed-form per-head ridge mapper
+│   └── 05_benchmark.py              # Stage 6: Perplexity, KV R² and latency in the real target model
 │
 └── outputs/
     ├── .gitkeep                     # Keeps folder tracked; .pt files are gitignored
     ├── inspect_outputs.py           # Utility to inspect saved .pt tensor files
-    ├── kv_source.pt                 # [generated] Raw KV tensors, source model
-    ├── kv_target.pt                 # [generated] Raw KV tensors, target model
+    ├── kv_source.pt                 # [generated] KV cache tensors (RoPE applied), source model
+    ├── kv_target.pt                 # [generated] KV cache tensors (RoPE applied), target model
     ├── kv_source_norope.pt          # [generated] RoPE-stripped KV, source model
     ├── kv_target_norope.pt          # [generated] RoPE-stripped KV, target model
-    ├── r2_matrix.pt                 # [generated] R² scores (L_tgt × L_src)
-    └── top_k_mapping.pt             # [generated] Top-4 source layers per target layer
+    ├── r2_matrix.pt                 # [generated] Selection score (L_tgt × L_src), mean of K and V R²
+    ├── r2_kv.pt                     # [generated] Separate K and V R² matrices
+    ├── top_k_mapping.pt             # [generated] Top-4 source layers per target layer
+    ├── mapper_k{k}.pt               # [generated] Ridge mapper weights for a given k
+    └── benchmark_k{k}.json          # [generated] Stage 6 results (tracked in git)
 ```
 
 ---
@@ -84,7 +90,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-> **First run only:** models are downloaded automatically from Hugging Face (~4 GB total) and cached in `~/.cache/huggingface/hub/`. Subsequent runs use the local cache.
+> **First run only:** models (~4 GB total) and the WikiText-2 corpus (~10 MB) are downloaded automatically from Hugging Face and cached in `~/.cache/huggingface/hub/`. Subsequent runs use the local cache.
 
 ---
 
@@ -93,18 +99,26 @@ pip install -r requirements.txt
 Run each stage in order from the repo root. Each stage saves its output to `outputs/` for the next stage to load.
 
 ```bash
-# Stage 1 & 2 — Load models, extract KV tensors (~10-15 min first run)
+# Stage 1 & 2 — Extract KV caches on 64 × 256 WikiText-2 train tokens
 python stages/01_extract_kv.py
 
-# Stage 3 — Strip RoPE from Key vectors (~10 sec)
+# Stage 3 — Strip RoPE from Key vectors
 python stages/02_rope_strip.py
 
-# Stage 4 — Select top-4 source layers per target layer via R² (~2-5 min)
+# Stage 4 — Select top-4 source layers per target layer via K+V R²
 python stages/03_layer_select.py
+
+# Stage 5 — Fit the ridge mapper (add --k 8 or --k all to try other k)
+python stages/04_fit_mapper.py
+
+# Stage 6 — Benchmark the mapped cache inside Qwen2.5-1.5B (add --k to match Stage 5)
+python stages/05_benchmark.py
 
 # Inspect any saved .pt file
 python outputs/inspect_outputs.py
 ```
+
+Each stage runs one model at a time where possible, so peak memory stays under ~6 GB.
 
 ---
 

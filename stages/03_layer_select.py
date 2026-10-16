@@ -2,14 +2,16 @@
 Stage 4 — Top-k Source Layer Selection
 
 For every (source layer, target layer, head) triple, fits a quick OLS
-regression on the RoPE-stripped keys and records R² — how well the source
-layer linearly predicts the target layer.
+regression on the RoPE-stripped keys and on the values, and records R² —
+how well the source layer linearly predicts the target layer.
 
-Averages R² across heads to get a (L_tgt × L_src) score matrix, then picks
-the top-k source layers for each target layer.
+Following paper §3.2, the selection score is the head-averaged R² averaged
+over RoPE-stripped keys and values. That gives a (L_tgt × L_src) score
+matrix, from which the top-k source layers are picked for each target layer.
 
 Outputs:
-    outputs/r2_matrix.pt      — float tensor (L_tgt, L_src) of mean R² scores
+    outputs/r2_matrix.pt      — float tensor (L_tgt, L_src), mean of key and value R²
+    outputs/r2_kv.pt          — dict {"keys": (L_tgt, L_src), "values": (L_tgt, L_src)}
     outputs/top_k_mapping.pt  — long tensor  (L_tgt, k) of selected source indices
 """
 
@@ -69,20 +71,20 @@ def main():
     print("[Load] outputs/kv_target_norope.pt")
     tgt = torch.load("outputs/kv_target_norope.pt", weights_only=True)
 
-    src_keys = src["keys"].float()   # (L_src, N, H, T, D_src)
-    tgt_keys = tgt["keys"].float()   # (L_tgt, N, H, T, D_tgt)
+    src_kv = {"keys": src["keys"].float(), "values": src["values"].float()}  # (L_src, N, H, T, D_src)
+    tgt_kv = {"keys": tgt["keys"].float(), "values": tgt["values"].float()}  # (L_tgt, N, H, T, D_tgt)
 
-    L_src, N, H, T, D_src = src_keys.shape
-    L_tgt, _, _, _, D_tgt = tgt_keys.shape
+    L_src, N, H, T, D_src = src_kv["keys"].shape
+    L_tgt, _, _, _, D_tgt = tgt_kv["keys"].shape
 
     print(f"\n  Source : {L_src} layers, head_dim={D_src}")
     print(f"  Target : {L_tgt} layers, head_dim={D_tgt}")
     print(f"  Heads  : {H},  Samples: {N},  Seq len: {T}")
-    print(f"  Regressions to run: {L_tgt} × {L_src} × {H} = {L_tgt*L_src*H}")
+    print(f"  Regressions to run: 2 (K,V) × {L_tgt} × {L_src} × {H} = {2*L_tgt*L_src*H}")
 
-    # ── compute R² matrix ─────────────────────────────────────────────────────
-    # r2[l_tgt, l_src] = mean R² across heads
-    r2_matrix = torch.zeros(L_tgt, L_src)
+    # ── compute R² matrices ───────────────────────────────────────────────────
+    # r2[kind][l_tgt, l_src] = mean R² across heads
+    r2 = {kind: torch.zeros(L_tgt, L_src) for kind in ("keys", "values")}
 
     total = L_tgt * L_src
     done  = 0
@@ -91,19 +93,22 @@ def main():
 
     for l_t in range(L_tgt):
         for l_s in range(L_src):
-            head_r2 = []
-            for h in range(H):
-                # Flatten (N, T, D) → (N*T, D)
-                X = src_keys[l_s, :, h, :, :].reshape(N * T, D_src)
-                Y = tgt_keys[l_t, :, h, :, :].reshape(N * T, D_tgt)
-                head_r2.append(ols_r2(X, Y))
-
-            r2_matrix[l_t, l_s] = sum(head_r2) / len(head_r2)
+            for kind in ("keys", "values"):
+                head_r2 = []
+                for h in range(H):
+                    # Flatten (N, T, D) → (N*T, D)
+                    X = src_kv[kind][l_s, :, h, :, :].reshape(N * T, D_src)
+                    Y = tgt_kv[kind][l_t, :, h, :, :].reshape(N * T, D_tgt)
+                    head_r2.append(ols_r2(X, Y))
+                r2[kind][l_t, l_s] = sum(head_r2) / len(head_r2)
             done += 1
             if done % 50 == 0 or done == total:
                 print(f"\r[R²] Computing …  ({done}/{total})", end="", flush=True)
 
     print()   # newline after progress
+
+    # Paper §3.2: rank source layers by R² averaged over stripped keys and values
+    r2_matrix = (r2["keys"] + r2["values"]) / 2
 
     # ── top-k selection ───────────────────────────────────────────────────────
     # For each target layer, pick k source layers with highest R²
@@ -138,7 +143,9 @@ def main():
         print(f"  tgt {l_t:2d} |{bar}| top=[{top_str}] R2={best_r2:.3f}")
 
     # ── summary statistics ────────────────────────────────────────────────────
-    print(f"\n  Overall mean R²  : {r2_matrix.mean().item():.4f}")
+    print(f"\n  Mean key R²      : {r2['keys'].mean().item():.4f}")
+    print(f"  Mean value R²    : {r2['values'].mean().item():.4f}")
+    print(f"  Overall mean R²  : {r2_matrix.mean().item():.4f}  (selection score, K and V averaged)")
     print(f"  Overall max R²   : {r2_matrix.max().item():.4f}")
     print(f"  Overall min R²   : {r2_matrix.min().item():.4f}")
 
@@ -150,9 +157,11 @@ def main():
 
     # ── save ──────────────────────────────────────────────────────────────────
     torch.save(r2_matrix,  "outputs/r2_matrix.pt")
+    torch.save(r2,         "outputs/r2_kv.pt")
     torch.save(top_k_idx,  "outputs/top_k_mapping.pt")
 
     print("\n[Saved] outputs/r2_matrix.pt")
+    print("[Saved] outputs/r2_kv.pt")
     print("[Saved] outputs/top_k_mapping.pt")
     print("\nDone. Stage 4 complete.")
 
