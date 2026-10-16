@@ -56,7 +56,8 @@ KVcacheSWE/
 │   ├── 02_rope_strip.py             # Stage 3: Remove RoPE from Key vectors
 │   ├── 03_layer_select.py           # Stage 4: Top-k source layer selection via K+V R²
 │   ├── 04_fit_mapper.py             # Stage 5: Closed-form per-head ridge mapper
-│   └── 05_benchmark.py              # Stage 6: Perplexity, KV R² and latency in the real target model
+│   ├── 05_benchmark.py              # Stage 6: Perplexity, KV R² and latency in the real target model
+│   └── walkthrough.py               # Teaching demo: one prompt through every step
 │
 └── outputs/
     ├── .gitkeep                     # Keeps folder tracked; .pt files are gitignored
@@ -122,17 +123,31 @@ Each stage runs one model at a time where possible, so peak memory stays under ~
 
 ---
 
-## Results So Far
+## Results
 
 | Stage | Status | Key Result |
 |---|---|---|
-| KV Extraction | ✅ Complete | Tensors shape `(L, 15, 2, 256, D)` saved |
+| KV Extraction | ✅ Complete | 64 × 256 WikiText-2 tokens, tensors `(L, 64, 2, 256, D)` |
 | RoPE Stripping | ✅ Complete | Round-trip error 3.05e-05, well below 1e-4 |
-| Layer Selection | ✅ Complete | Mean R² = **0.777** across all 672 layer pairs |
-| Ridge Mapper | 🔲 Pending | Stage 5 — `04_fit_mapper.py` |
-| Benchmarking | 🔲 Pending | Stage 6 — `05_benchmark.py` |
+| Layer Selection | ✅ Complete | Single-layer R²: keys 0.40, values 0.14 |
+| Ridge Mapper (k=4) | ✅ Complete | Held-out R²: keys **0.63**, values **0.41** |
+| Benchmarking | ✅ Complete | Transfer keeps **58%** of the prefix's perplexity benefit |
 
-**Mean R² of 0.777** means the source model's KV cache can linearly predict ~78% of the variance in the target model's KV cache — strong evidence the transfer will work.
+### Stage 6 — prefix-conditioned perplexity (WikiText-2 test, 16 × (256 prefix + 128 scored))
+
+| How the 1.5B model gets the prefix | PPL ↓ | Prefix benefit kept | Top-1 agrees with 1.5B |
+|---|---|---|---|
+| Its own prefill (ceiling) | 9.60 | 100% | 100% |
+| Own cache via strip → re-RoPE (plumbing check) | 9.60 | 100% | 100% |
+| **Transferred from 0.5B via mapper** | **13.78** | **58%** | **77%** |
+| No prefix at all (floor) | 19.50 | 0% | 71% |
+| *(reference)* 0.5B continues on its own | 13.31 | 62% | 71% |
+
+**Reading it:** the mapped cache clearly carries the prefix's meaning — perplexity drops from 19.5 to 13.8 — but about 40% of the benefit is lost. The 1.5B model with a mapped cache agrees with its own predictions more often than the 0.5B model does, yet its perplexity is still slightly worse than just letting the 0.5B model continue. Values are the weak spot (R² 0.41 vs 0.63 for keys), matching the paper's finding that V is harder than K.
+
+**Latency (CPU):** applying the mapper takes 15–166 ms vs 4.4–66 s for 1.5B re-prefill at 64–1024 tokens. The ~300–400× ratio is inflated because bf16 matmuls are slow on this CPU; the paper measures 4–25× on H100s.
+
+**One-prompt walkthrough:** `python stages/walkthrough.py` follows a single sentence through every step and prints the next-token predictions from each cache.
 
 ---
 
