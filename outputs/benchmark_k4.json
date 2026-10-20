@@ -102,24 +102,24 @@
   "latency": [
     {
       "seq_len": 64,
-      "target_reprefill_ms": 4366.173239999625,
-      "mapper_ms": 14.877719993819483,
-      "source_prefill_ms": 1381.466000006185,
-      "speedup": 293.4705883571828
+      "target_reprefill_ms": 3734.2165119998754,
+      "mapper_ms": 11.58687400038616,
+      "source_prefill_ms": 1071.113207000053,
+      "speedup": 322.27989290946147
     },
     {
       "seq_len": 256,
-      "target_reprefill_ms": 16529.95909099991,
-      "mapper_ms": 45.42731800029287,
-      "source_prefill_ms": 4958.059254997352,
-      "speedup": 363.87706381638776
+      "target_reprefill_ms": 14521.473394999703,
+      "mapper_ms": 30.545146000349632,
+      "source_prefill_ms": 4324.61470599992,
+      "speedup": 475.41018120631946
     },
     {
       "seq_len": 1024,
-      "target_reprefill_ms": 65991.57950500376,
-      "mapper_ms": 166.17049100022996,
-      "source_prefill_ms": 18760.443876002682,
-      "speedup": 397.1317597232858
+      "target_reprefill_ms": 56583.17243700003,
+      "mapper_ms": 112.37530600010359,
+      "source_prefill_ms": 16570.638613999563,
+      "speedup": 503.5196294544272
     }
   ]
 }
