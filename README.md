@@ -1,4 +1,4 @@
-# KVcacheSWE — Cross-Model KV Cache Transfer
+# KVcacheReplication — Cross-Model KV Cache Transfer
 
 A local CPU replication of the NVIDIA paper:
 > **"Cross-Model KV Cache Transfer in LLM Families: A Closed-Form Linear Mapping for Prefill Reuse"**
